@@ -187,14 +187,6 @@ async def read_stream_into_buffer(stream_ref: Any, buffer: Buffer) -> None:
     )
 
 
-async def read_stream_into_buffer(stream_ref: Any, buffer: Buffer) -> None:
-    """Reads data from a media stream into a buffer."""
-    readable_stream = await stream_ref.open_read_async()
-    await readable_stream.read_async(
-        buffer, buffer.capacity, InputStreamOptions.READ_AHEAD
-    )
-
-
 async def extract_media_info(session) -> Optional[Dict[str, Any]]:
     """Extracts media information and thumbnail for the current session."""
     info = await session.try_get_media_properties_async()
