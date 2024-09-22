@@ -1,0 +1,5 @@
+numpy
+PyNaCl
+SoundCard
+winsdk
+discord.py

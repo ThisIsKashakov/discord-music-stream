@@ -1,0 +1,13 @@
+{
+    "DISCORD_TOKEN": "",
+    "GUILD_ID": "",
+    "VOICE_CHANNEL_ID": "",
+    "TEXT_CHANNEL_ID": "",
+    "desktop_clients": [
+        "Spotify",
+        "Yandex.Music",
+        "Apple Music",
+        "YouTube Music"
+    ],
+    "MICROPHONE_ID": "CABLE Input (VB-Audio Virtual Cable)"
+}
