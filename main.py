@@ -15,18 +15,54 @@ from winsdk.windows.storage.streams import DataReader, Buffer, InputStreamOption
 
 
 def load_config() -> Dict[str, Any]:
-    """Loads configuration from config.json file."""
-    with open("config.json", "r") as config_file:
-        return json.load(config_file)
+    """Loads and validates configuration from config.json file."""
+    try:
+        with open("config.json", "r") as config_file:
+            config = json.load(config_file)
+    except FileNotFoundError:
+        raise SystemExit("Error: config.json file not found.")
+    except json.JSONDecodeError:
+        raise SystemExit("Error: config.json is not a valid JSON file.")
+
+    required_keys = [
+        "DISCORD_TOKEN",
+        "GUILD_ID",
+        "VOICE_CHANNEL_ID",
+        "TEXT_CHANNEL_ID",
+        "desktop_clients",
+        "MICROPHONE_ID",
+    ]
+    for key in required_keys:
+        if key not in config:
+            raise SystemExit(f"Error: '{key}' is missing in config.json")
+        if not config[key] and key != "desktop_clients":
+            raise SystemExit(f"Error: '{key}' has an empty value in config.json")
+
+    int_keys = ["GUILD_ID", "VOICE_CHANNEL_ID", "TEXT_CHANNEL_ID"]
+    for key in int_keys:
+        if not config[key].isdigit():
+            raise SystemExit(f"Error: '{key}' must contain only digits in config.json")
+        config[key] = int(config[key])
+
+    if not isinstance(config["desktop_clients"], list) or not config["desktop_clients"]:
+        raise SystemExit(
+            "Error: 'desktop_clients' must be a non-empty list in config.json"
+        )
+
+    return config
 
 
-CONFIG = load_config()
-TOKEN: str = CONFIG["DISCORD_TOKEN"]
-GUILD_ID: int = int(CONFIG["GUILD_ID"])
-VOICE_CHANNEL_ID: int = int(CONFIG["VOICE_CHANNEL_ID"])
-TEXT_CHANNEL_ID: int = int(CONFIG["TEXT_CHANNEL_ID"])
-DESKTOP_CLIENTS: list[str] = CONFIG["desktop_clients"]
-MICROPHONE_ID: str = CONFIG["MICROPHONE_ID"]
+try:
+    CONFIG = load_config()
+    TOKEN: str = CONFIG["DISCORD_TOKEN"]
+    GUILD_ID: int = CONFIG["GUILD_ID"]
+    VOICE_CHANNEL_ID: int = CONFIG["VOICE_CHANNEL_ID"]
+    TEXT_CHANNEL_ID: int = CONFIG["TEXT_CHANNEL_ID"]
+    DESKTOP_CLIENTS: list[str] = CONFIG["desktop_clients"]
+    MICROPHONE_ID: str = CONFIG["MICROPHONE_ID"]
+except SystemExit as e:
+    print(e)
+    exit(1)
 
 CHUNK: int = 960
 CHANNELS: int = 2
@@ -190,15 +226,24 @@ def get_track_crc(title: str, artist: str) -> int:
     return zlib.crc32(f"{title} - {artist}".encode("utf-8"))
 
 
+def is_valid_string(s: Any) -> bool:
+    """Check if the input is a non-empty string."""
+    return isinstance(s, str) and len(s.strip()) > 0
+
+
 async def send_embed_message(channel: discord.TextChannel, **kwargs: Any) -> None:
     """Send a rich embedded message to the Discord text channel."""
     title = kwargs.get("title", "Unknown Title")
     artist = kwargs.get("artist", "Unknown Artist")
-    album = kwargs.get("album", "Unknown Album")
+    album = kwargs.get("album")
     thumbnail_bytes = kwargs.get("thumbnail_bytes", None)
     current_track_crc = kwargs.get("current_track_crc", 0)
 
-    now_playing = f"**Now Playing: {title} - {artist} ({album})**"
+    now_playing = f"**Now Playing: {title} - {artist}"
+    if album:
+        now_playing += f" ({album})"
+    now_playing += "**"
+
     copyable = f"```\n{title} - {artist}\n```"
 
     embed = discord.Embed(description=now_playing, color=discord.Color.blue())
@@ -218,11 +263,18 @@ async def send_embed_message(channel: discord.TextChannel, **kwargs: Any) -> Non
         print(f"Error sending message: {e}")
 
 
-async def update_presence(title: str, artist: str, album: str, status: str) -> None:
+async def update_presence(
+    title: str, artist: str, album: Optional[str], status: str
+) -> None:
     """Update bot's presence with current track information."""
+    name = f"{title} - {artist}"
+    if album:
+        name += f" ({album})"
+    name += f". Status: {status}"
+
     activity = discord.Activity(
         type=discord.ActivityType.listening,
-        name=f"{title} - {artist} ({album}). Status: {status}",
+        name=name,
     )
     await bot.change_presence(activity=activity)
 
@@ -233,9 +285,13 @@ async def process_media_info(
     """Process media information and update bot's presence and Discord channel."""
     global last_media_info, track_crc
 
-    title = media_info.get("title", "Unknown Title")
-    artist = media_info.get("artist", "Unknown Artist")
-    album = media_info.get("album_title", "Unknown Album")
+    title = media_info.get("title", "")
+    artist = media_info.get("artist", "")
+    album = media_info.get("album_title", "")
+
+    if not (is_valid_string(title) and is_valid_string(artist)):
+        print("Invalid or empty media information received. Skipping update.")
+        return
 
     current_track_crc = get_track_crc(title, artist)
 
@@ -259,14 +315,16 @@ async def process_media_info(
                 channel=channel,
                 title=title,
                 artist=artist,
-                album=album,
+                album=album if is_valid_string(album) else None,
                 thumbnail_bytes=thumbnail_bytes,
                 current_track_crc=current_track_crc,
             )
         else:
             print(f"Error: Could not find text channel with ID {TEXT_CHANNEL_ID}")
 
-        await update_presence(title, artist, album, status)
+        await update_presence(
+            title, artist, album if is_valid_string(album) else None, status
+        )
 
         last_media_info = media_info
 
@@ -389,10 +447,20 @@ async def leave(ctx: commands.Context) -> None:
 def main() -> None:
     try:
         bot.run(TOKEN)
+    except discord.LoginFailure as e:
+        print(f"Error: Failed to log in. The token may be invalid. Details: {e}")
+    except discord.HTTPException as e:
+        print(
+            f"Error: An HTTP error occurred while connecting to Discord. Details: {e}"
+        )
     except KeyboardInterrupt:
         print("Keyboard interrupt detected. Shutting down...")
     except RuntimeError as e:
         print(f"Runtime error occurred: {e}")
+    except ConnectionResetError as e:
+        print(f"Connection reset error occurred: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
     finally:
         release_audio_resources()
         if not bot.is_closed():
