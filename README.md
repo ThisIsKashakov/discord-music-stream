@@ -1,6 +1,6 @@
 # 🎧 Discord Music Streaming Bot
 
-A Discord bot that allows you to streams live audio from desktop music clients (such as Spotify, [`YouTube Music`](https://github.com/th-ch/youtube-music), Apple Music, and Yandex Music) directly into a Discord voice channel. It uses the desktop's loopback microphone to capture the audio output and broadcast it to your Discord voice channel in real-time.
+A Discord bot that allows you to stream live audio from desktop music clients (such as Spotify, [`YouTube Music`](https://github.com/th-ch/youtube-music), Apple Music, and Yandex Music) directly into a Discord voice channel. It uses the desktop's loopback microphone to capture the audio output and broadcast it to your Discord voice channel in real-time.
 
 ## Features:
 - **Real-time music streaming** from desktop clients (Spotify, Apple Music, [`YouTube Music`](https://github.com/th-ch/youtube-music), etc.) to Discord.
