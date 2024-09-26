@@ -17,7 +17,7 @@ from winsdk.windows.storage.streams import DataReader, Buffer, InputStreamOption
 def load_config() -> Dict[str, Any]:
     """Loads and validates configuration from config.json file."""
     try:
-        with open("config.json", "r") as config_file:
+        with open("config.json", "r", encoding="utf-8") as config_file:
             config = json.load(config_file)
     except FileNotFoundError:
         raise SystemExit("Error: config.json file not found.")
