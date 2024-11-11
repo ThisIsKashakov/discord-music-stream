@@ -10,5 +10,6 @@
         "Apple Music",
         "YouTube Music"
     ],
-    "MICROPHONE_ID": "CABLE Input (VB-Audio Virtual Cable)"
+    "MICROPHONE_ID": "CABLE Input (VB-Audio Virtual Cable)",
+    "enable_media_events": true
 }

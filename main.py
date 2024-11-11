@@ -3,7 +3,7 @@ import discord
 import soundcard as sc
 import numpy as np
 import io
-import json
+from config_loader import config, ConfigError
 import zlib
 from typing import Optional, Dict, Any, Mapping
 from discord.ext import commands, tasks
@@ -20,55 +20,21 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-def load_config() -> Dict[str, Any]:
-    """Loads and validates configuration from config.json file."""
-    try:
-        with open("config.json", "r", encoding="utf-8") as config_file:
-            config = json.load(config_file)
-    except FileNotFoundError:
-        raise SystemExit("Error: config.json file not found.")
-    except json.JSONDecodeError:
-        raise SystemExit("Error: config.json is not a valid JSON file.")
-
-    required_keys = [
-        "DISCORD_TOKEN",
-        "GUILD_ID",
-        "VOICE_CHANNEL_ID",
-        "TEXT_CHANNEL_ID",
-        "desktop_clients",
-        "MICROPHONE_ID",
-    ]
-    for key in required_keys:
-        if key not in config:
-            raise SystemExit(f"Error: '{key}' is missing in config.json")
-        if not config[key] and key != "desktop_clients":
-            raise SystemExit(f"Error: '{key}' has an empty value in config.json")
-
-    int_keys = ["GUILD_ID", "VOICE_CHANNEL_ID", "TEXT_CHANNEL_ID"]
-    for key in int_keys:
-        if not config[key].isdigit():
-            raise SystemExit(f"Error: '{key}' must contain only digits in config.json")
-        config[key] = int(config[key])
-
-    if not isinstance(config["desktop_clients"], list) or not config["desktop_clients"]:
-        raise SystemExit(
-            "Error: 'desktop_clients' must be a non-empty list in config.json"
-        )
-
-    return config
-
-
 try:
-    CONFIG = load_config()
-    TOKEN: str = CONFIG["DISCORD_TOKEN"]
-    GUILD_ID: int = CONFIG["GUILD_ID"]
-    VOICE_CHANNEL_ID: int = CONFIG["VOICE_CHANNEL_ID"]
-    TEXT_CHANNEL_ID: int = CONFIG["TEXT_CHANNEL_ID"]
-    DESKTOP_CLIENTS: list[str] = CONFIG["desktop_clients"]
-    MICROPHONE_ID: str = CONFIG["MICROPHONE_ID"]
-except SystemExit as e:
+    config.load()
+
+    TOKEN = config.DISCORD_TOKEN
+    GUILD_ID = config.GUILD_ID
+    VOICE_CHANNEL_ID = config.VOICE_CHANNEL_ID
+    TEXT_CHANNEL_ID = config.TEXT_CHANNEL_ID
+    DESKTOP_CLIENTS = config.desktop_clients
+    MICROPHONE_ID = config.MICROPHONE_ID
+    ENABLE_MEDIA_EVENTS = config.enable_media_events
+
+except ConfigError as e:
     logging.error(e)
     exit(1)
+
 
 class ReconnectingVoiceClient:
     def __init__(self, bot, guild_id: int, channel_id: int):
@@ -90,7 +56,9 @@ class ReconnectingVoiceClient:
 
         channel = guild.get_channel(self.channel_id)
         if not channel:
-            logging.error(f"Error: Could not find voice channel with ID {self.channel_id}")
+            logging.error(
+                f"Error: Could not find voice channel with ID {self.channel_id}"
+            )
             return
 
         try:
@@ -106,44 +74,49 @@ class ReconnectingVoiceClient:
             return
 
         self.is_reconnecting = True
-        
+
         while self.reconnect_attempts < self.max_reconnect_attempts:
             try:
                 self.reconnect_attempts += 1
-                logging.info(f"Attempting to reconnect... (Attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
-                
+                logging.info(
+                    f"Attempting to reconnect... (Attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
+                )
+
                 # Clean up existing voice client if any
                 if self.voice_client and self.voice_client.is_connected():
                     await self.voice_client.disconnect(force=True)
-                
+
                 await self.connect()
-                
+
                 if self.voice_client and self.voice_client.is_connected():
                     logging.info("Reconnection successful!")
                     self.reconnect_attempts = 0
                     self.is_reconnecting = False
-                    
+
                     # Restart audio streaming
                     global audio_task
                     if audio_task is None or audio_task.done():
                         audio_task = asyncio.create_task(stream_audio())
                     return
-                
+
             except Exception as e:
                 logging.error(f"Reconnection attempt failed: {e}")
-                
+
             # Exponential backoff for retry delays
             delay = min(self.reconnect_delay * (2 ** (self.reconnect_attempts - 1)), 60)
             await asyncio.sleep(delay)
-        
-        logging.fatal("Max reconnection attempts reached. Please check your connection and restart the bot.")
+
+        logging.fatal(
+            "Max reconnection attempts reached. Please check your connection and restart the bot."
+        )
         self.is_reconnecting = False
+
 
 class MusicBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.voice_handler = None
-        
+
     async def setup_hook(self) -> None:
         """This is called when the bot is done preparing data"""
         self.check_connection.start()
@@ -152,8 +125,8 @@ class MusicBot(commands.Bot):
     async def check_connection(self):
         """Periodically check voice connection status."""
         if self.voice_handler and (
-            not self.voice_handler.voice_client or 
-            not self.voice_handler.voice_client.is_connected()
+            not self.voice_handler.voice_client
+            or not self.voice_handler.voice_client.is_connected()
         ):
             logging.info("Detected disconnection from voice channel")
             await self.voice_handler.handle_disconnect()
@@ -161,6 +134,7 @@ class MusicBot(commands.Bot):
     @check_connection.before_loop
     async def before_check_connection(self):
         await self.wait_until_ready()
+
 
 def release_audio_resources() -> None:
     """Releases resources of audio devices."""
@@ -174,6 +148,7 @@ def release_audio_resources() -> None:
         mic_stream = None
     if microphone is not None:
         microphone = None
+
 
 CHUNK: int = 960
 CHANNELS: int = 2
@@ -200,7 +175,6 @@ playback_status: Mapping[PlaybackStatus, str] = {
     PlaybackStatus.CHANGING: "Changing",
     PlaybackStatus.OPENED: "Opened",
 }
-
 
 
 async def stream_audio() -> None:
@@ -380,7 +354,6 @@ async def process_media_info(
     album = media_info.get("album_title", "")
 
     if not (is_valid_string(title) and is_valid_string(artist)):
-        logging.error("Invalid or empty media information received. Skipping update.")
         return
 
     current_track_crc = get_track_crc(title, artist)
@@ -410,7 +383,9 @@ async def process_media_info(
                 current_track_crc=current_track_crc,
             )
         else:
-            logging.error(f"Error: Could not find text channel with ID {TEXT_CHANNEL_ID}")
+            logging.error(
+                f"Error: Could not find text channel with ID {TEXT_CHANNEL_ID}"
+            )
 
         await update_presence(
             title, artist, album if is_valid_string(album) else None, status
@@ -459,6 +434,9 @@ async def handle_playback_change(session, args) -> None:
 
 async def setup_media_events() -> None:
     """Setting up event handlers for Windows Media."""
+    if not ENABLE_MEDIA_EVENTS:
+        logging.info("Media events are disabled in configuration.")
+        return
     manager = await MediaManager.request_async()
     loop = asyncio.get_running_loop()
 
@@ -482,10 +460,16 @@ async def on_ready() -> None:
     global audio_task, last_media_info
     logging.info(f"Logged in as {bot.user.name}")
 
-    media_info, status = await get_current_media_info()
-
-    if media_info:
-        await process_media_info(media_info, status)
+    if ENABLE_MEDIA_EVENTS:
+        media_info, status = await get_current_media_info()
+        if media_info:
+            await process_media_info(media_info, status)
+        else:
+            activity = discord.Activity(
+                type=discord.ActivityType.playing,
+                name="Audio Streaming",
+            )
+            await bot.change_presence(activity=activity)
     else:
         activity = discord.Activity(
             type=discord.ActivityType.playing,
@@ -496,11 +480,12 @@ async def on_ready() -> None:
     # Initialize the voice handler
     bot.voice_handler = ReconnectingVoiceClient(bot, GUILD_ID, VOICE_CHANNEL_ID)
     await bot.voice_handler.connect()
-    
+
     if audio_task is None or audio_task.done():
         audio_task = asyncio.create_task(stream_audio())
 
     await setup_media_events()
+
 
 @bot.command()
 async def join(ctx: commands.Context) -> None:
@@ -532,7 +517,9 @@ def main() -> None:
     try:
         bot.run(TOKEN)
     except discord.LoginFailure as e:
-        logging.error(f"Error: Failed to log in. The token may be invalid. Details: {e}")
+        logging.error(
+            f"Error: Failed to log in. The token may be invalid. Details: {e}"
+        )
     except discord.HTTPException as e:
         logging.error(
             f"Error: An HTTP error occurred while connecting to Discord. Details: {e}"
@@ -543,6 +530,8 @@ def main() -> None:
         logging.error(f"Runtime error occurred: {e}")
     except ConnectionResetError as e:
         logging.error(f"Connection reset error occurred: {e}")
+    except discord.errors.ConnectionClosed as e:
+        logging.error(f"Connection closed error occurred: {e}")
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}")
     finally:
